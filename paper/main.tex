@@ -13,6 +13,9 @@
 \usepackage{booktabs}
 \usepackage{xcolor}
 \usepackage{graphicx}
+% ICAISD checklist: references are cited in text as a SUPERSCRIPT [n].
+% acmart's default numeric style sets them inline, so override natbib.
+\setcitestyle{super,open={[},close={]}}
 \graphicspath{{../figures/}{figures/}}
 
 % Loud placeholder: an unmeasured number must never reach a reviewer quietly.
@@ -399,19 +402,6 @@ Section~\ref{sec:threats}. The gap is not, however, of a size that additional
 epochs would close.
 
 \subsection{Cost}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{pareto_infer_joules_per_1k.pdf}
-\caption{The same frontier measured on inference energy per 1000 samples
-(log scale). The ordering of the learned models is identical to
-Figure~\ref{fig:pareto-train}---the agreement between measured axes that
-Section~\ref{sec:proxy} quantifies---while the gap to Historical Last widens
-to four orders of magnitude.}
-\Description{Scatter plot of test MAE against inference energy per thousand samples on a logarithmic axis for the same four models. The ordering of the learned models matches the training-energy plot, and Historical Last sits four orders of magnitude to the left.}
-\label{fig:pareto-infer}
-\end{figure}
-
 The cost axis spans a far wider range than the accuracy axis, and this
 asymmetry is the central empirical observation of the paper. Across the models
 measured, training energy varies by a factor of 4.61 between LSTM and Graph
@@ -422,7 +412,7 @@ compress as models improve while cost differences do not. The analytic axis
 extends this pattern well past the range we metered: STID's forward cost is
 143.52~MFLOPs against Graph WaveNet's 11{,}883.93~MFLOPs, a factor of 82.8,
 and NLinear's 0.21~MFLOPs is four further orders of magnitude below that
-(Table~\ref{tab:analytic}). Whether accuracy falls in proportion is precisely
+(Section~\ref{sec:analytic}). Whether accuracy falls in proportion is precisely
 what a metered run of those two models would settle, and we do not claim it
 here.
 
@@ -476,14 +466,32 @@ logarithmic axis.}
 \label{fig:pareto-train}
 \end{figure}
 
-On the training-energy axis the four metered models form a monotone frontier:
-error falls as energy rises, from Historical Last at zero energy through LSTM
-and STGCN to Graph WaveNet. No model is strictly dominated on that axis, and
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{pareto_infer_joules_per_1k.pdf}
+\caption{The same frontier measured on inference energy per 1000 samples
+(log scale). The ordering of the learned models is identical to
+Figure~\ref{fig:pareto-train}---the agreement between measured axes that
+Section~\ref{sec:proxy} quantifies---while the gap to Historical Last widens
+to four orders of magnitude.}
+\Description{Scatter plot of test MAE against inference energy per thousand samples on a logarithmic axis for the same four models. The ordering of the learned models matches the training-energy plot, and Historical Last sits four orders of magnitude to the left.}
+\label{fig:pareto-infer}
+\end{figure}
+
+
+On the training-energy axis the four metered models form a monotone frontier
+(Figure~\ref{fig:pareto-train}): error falls as energy rises, from Historical
+Last at zero energy through LSTM and STGCN to Graph WaveNet. No model is strictly dominated on that axis, and
 we say so plainly because the opposite would have been the more striking
 result. What the frontier shows instead is diminishing return. The step from
 LSTM to STGCN buys 6.57~MAE for $1.34\times$ the energy; the step from STGCN
 to Graph WaveNet buys 1.47~MAE for $3.44\times$ the energy. The last step is
 the expensive one, and it purchases the smallest improvement.
+
+Measuring the same four models on inference energy rather than training energy
+reproduces that shape and that ordering exactly (Figure~\ref{fig:pareto-infer}),
+which is the agreement between measured axes that Section~\ref{sec:proxy} turns
+into the paper's central claim.
 
 Domination does appear once cost is measured on a different axis. Against
 forward FLOPs, STGCN strictly dominates LSTM --- better error at 19.78 versus
@@ -559,6 +567,7 @@ prevents the parallel execution its FLOP count implies, which is why FLOPs
 misplace LSTM specifically.
 
 \subsection{Architecture-determined cost across the full lineup}
+\label{sec:analytic}
 Parameter count and forward FLOPs are fixed by a model's definition and its
 input shape. They require no training run, no energy meter and no particular
 device, and they are therefore the two axes on which we can report all six
@@ -625,7 +634,8 @@ information about how traffic evolves. The learned models degrade far more
 gently: Graph WaveNet from 12.51 to 22.55, a factor of 1.80, and STGCN from
 15.31 to 23.42, a factor of 1.53.
 
-This produces a crossover worth noting. At the first horizon step STGCN's
+Figure~\ref{fig:horizon} plots the four curves. This produces a crossover
+worth noting. At the first horizon step STGCN's
 15.31 MAE is worse than Graph WaveNet's 12.51 by 2.80, but by the twelfth step
 the gap has narrowed to 0.87. The most expensive model's advantage is
 concentrated at short horizons and erodes as the forecast lengthens, which
