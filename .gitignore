@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+*.egg-info/
+.venv/
+
+# LaTeX build products -- main.pdf is regenerable from paper/main.tex
+paper/build/
+paper/*.bak-*
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.synctex.gz
+
+# The venue's template pack (acmart.cls, the ACM sample paper, the ICAISD
+# checklist and submission templates). Not our work, 14 MB, and not ours to
+# redistribute -- fetch it from the conference site instead. See
+# paper/FORMAT_REQUIREMENTS.md for what it contains and where it came from.
+paper/template/
+
+# Data. LargeST is ~7.8 GB and lives on Kaggle (dataset `liuxu77/largest`);
+# the harness mounts it read-only rather than vendoring it.
+data/
+*.h5
+*.npy
+*.zip
+
+# Run logs and checkpoints -- large, machine-specific, and not inputs to any
+# reported number. The per-run JSON records in results/ are what the paper
+# is built from, and those ARE tracked.
+logs/
+checkpoints/
+*.pt
+
+# Credentials -- never in this tree, but be explicit about it.
+kaggle.json
+access_token
+.kaggle/

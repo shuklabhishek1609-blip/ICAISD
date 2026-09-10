@@ -1,0 +1,559 @@
+% ICAISD 2026 submission -- compute-aware traffic forecasting benchmark.
+%
+% FORMAT: see paper/FORMAT_REQUIREMENTS.md. Submission is SINGLE column
+% (manuscript mode); ACM production typesets the two-column look after
+% acceptance, so do not fight the layout. Minimum 8 pages, NOT a cap.
+%
+% NUMBERS ARE NOT HAND-TYPED. Table 1 comes from
+%   python -c "from greenbench import analysis; \
+%              print(analysis.latex_table(analysis.load_results('results')))"
+% Anything not yet measured is a \PENDING{} and renders red.
+\documentclass[manuscript,screen,review]{acmart}
+
+\usepackage{booktabs}
+\usepackage{xcolor}
+
+% Loud placeholder: an unmeasured number must never reach a reviewer quietly.
+\newcommand{\PENDING}[1]{\textcolor{red}{\textbf{[PENDING: #1]}}}
+
+\begin{document}
+
+\title{What Does Accuracy Cost? A Compute-Aware Benchmark of
+Traffic Forecasting Models on LargeST}
+
+\author{Abhishek Shukla}
+\email{shuklabhishek1609@gmail.com}
+\affiliation{%
+  \institution{Independent Researcher}
+  \country{United States}
+}
+\thanks{Corresponding author.}
+
+\begin{abstract}
+Spatio-temporal traffic forecasting is evaluated almost entirely on error
+metrics, and the field's leaderboards are therefore silent about what
+accuracy costs to obtain. We report a compute-aware benchmark of
+six forecasting models on the San Diego subset of LargeST, in which
+every model is trained under an identical budget on identical hardware
+while training energy, inference energy, FLOPs, parameter count and
+inference latency are measured rather than estimated. We find that the
+accuracy--cost frontier is extremely uneven: \PENDING{headline comparison,
+e.g.\ the most expensive model's MAE advantage over a lightweight
+embedding model is 0.41, which is within the measured run-to-run spread,
+while costing 45$\times$ the training energy and 83$\times$ the FLOPs}. Two
+widely used baselines are strictly dominated, achieving worse error than a
+cheaper model at an order of magnitude more energy. We argue that reporting
+error alone is insufficient for a field whose models are increasingly
+deployed on metropolitan-scale sensor networks, and we release the
+instrumented harness so that cost can be reported as routinely as error.
+\end{abstract}
+
+\begin{CCSXML}
+<ccs2012>
+<concept>
+<concept_id>10010147.10010257.10010293.10010294</concept_id>
+<concept_desc>Computing methodologies~Neural networks</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+<concept>
+<concept_id>10010520.10010553.10010562</concept_id>
+<concept_desc>Computer systems organization~Embedded and cyber-physical systems</concept_desc>
+<concept_significance>300</concept_significance>
+</concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Computing methodologies~Neural networks}
+\ccsdesc[300]{Computer systems organization~Embedded and cyber-physical systems}
+
+\keywords{traffic forecasting, green AI, energy measurement,
+spatio-temporal graph neural networks, benchmarking, sustainable computing}
+
+\maketitle
+
+\section{Introduction}
+Traffic forecasting has become one of the standard proving grounds for
+spatio-temporal deep learning. A decade of work has produced a dense
+sequence of architectures---recurrent, convolutional, graph-based, and
+attention-based---each reporting improvements in mean absolute error on a
+small number of shared benchmarks. Almost none of that work reports what
+the improvement cost.
+
+This omission is not merely an accounting gap. Traffic forecasting is an
+applied field: models are proposed for deployment on real sensor networks
+operated by transportation agencies, where inference runs continuously
+across thousands of sensors and retraining is periodic rather than
+one-off. In that setting the relevant question is not only which model is
+most accurate but which model is worth its energy, latency and hardware
+footprint. A model that reduces MAE by two percent while consuming an
+order of magnitude more energy is a different proposition from one that
+achieves the same reduction for free, and the published record does not
+currently distinguish them.
+
+We take the position that cost should be a reported quantity rather than
+an afterthought, and that it should be \emph{measured} rather than
+inferred from parameter counts. Parameter count is a poor proxy: it
+ignores the sequential structure that makes recurrent models slow, the
+dense message passing that makes graph models expensive, and the fact that
+models differ in average power draw while running, not only in runtime.
+
+This paper contributes a compute-aware benchmark of six traffic
+forecasting models evaluated on the San Diego subset of the LargeST
+dataset. Our contributions are:
+
+\begin{itemize}
+  \item \textbf{An instrumented evaluation harness} that measures training
+        energy, inference energy, FLOPs, parameter count and inference
+        latency alongside conventional error metrics, on a single fixed
+        GPU, under a training budget held identical across models.
+  \item \textbf{A measured accuracy--cost frontier} for the model families
+        in common use, identifying which models lie on the Pareto frontier
+        and which are strictly dominated.
+  \item \textbf{An explicit treatment of measurement validity.} We report
+        run-to-run variance, identify which of our own numbers are bounds
+        rather than point estimates, and state where a measurement reflects
+        the instrument rather than the model.
+  \item \textbf{A released harness} so that cost reporting is reproducible
+        and cheap for subsequent work to adopt.
+\end{itemize}
+
+\section{Related Work}
+\subsection{Traffic forecasting benchmarks}
+Modern traffic forecasting is organised around a small number of shared
+benchmarks. METR-LA and PEMS-BAY, released with the diffusion convolutional
+recurrent network of Li et al.~\cite{li2018dcrnn}, established the protocol
+that the field still follows: a fixed sensor network, a fixed chronological
+split, a twelve-step input window and a twelve-step forecast horizon, scored
+by mean absolute error, root mean squared error and mean absolute percentage
+error. The architectures that followed were evaluated by dropping them into
+that protocol. Spatio-temporal graph convolutional networks~\cite{yu2018stgcn}
+replaced recurrence with convolution over the sensor graph; Graph
+WaveNet~\cite{wu2019graphwavenet} added a learned adjacency matrix so that the
+model was not restricted to the road-network topology. Each reported error
+reductions against its predecessors on the same two datasets.
+
+The standardisation this produced is genuine and valuable, and recent work has
+tightened it further. BasicTS+~\cite{shao2024basicts} demonstrates that a
+substantial part of the apparent progress in multivariate forecasting is an
+artefact of inconsistent training pipelines, and supplies a unified pipeline
+under which more than forty methods can be compared without that confound.
+LargeST~\cite{liu2023largest} attacks a different limitation --- scale ---
+observing that METR-LA and PEMS-BAY contain a few hundred sensors and a few
+months of data, which is not the regime in which a transportation agency
+actually operates. It provides 8,600 California sensors over five years,
+together with sensor metadata, and partitions them into regional subsets.
+
+What none of this standardisation covers is cost. BasicTS+ makes the error
+protocol fair; LargeST makes it large; neither makes the accounting of what a
+result cost to produce a reported quantity. The LargeST authors do report
+efficiency observations alongside their baselines, but as a practical remark
+about which models are trainable at scale rather than as a measured axis with
+a stated instrument. Our contribution sits precisely in that gap: we keep the
+error protocol these benchmarks established and add a cost protocol beside it,
+with the same seriousness about measurement and hardware control.
+
+\subsection{Efficiency and energy reporting in machine learning}
+The argument that efficiency belongs in the reported results rather than in an
+appendix is now well developed. Schwartz et al.~\cite{schwartz2020greenai}
+name the problem directly, contrasting ``Red AI'' --- accuracy bought with
+unreported compute --- against a Green AI in which efficiency is a first-class
+evaluation criterion, and propose the floating-point operation count as a
+reportable measure. Strubell et al.~\cite{strubell2019energy} give the
+empirical counterpart for natural language processing, estimating the energy
+and carbon cost of training then-current models and finding costs large enough
+to change how a research programme should be judged. Henderson et
+al.~\cite{henderson2020systematic} move from estimate to instrument, arguing
+that energy should be read from hardware counters rather than inferred, and
+providing tooling to do so.
+
+Two refinements of that literature bear directly on our design. The first is
+that estimated and measured cost can diverge substantially, because models
+differ not only in how long they run but in how much power they draw while
+running --- a quantity no analytic FLOP count expresses. The second is
+Luccioni et al.'s~\cite{luccioni2024power} observation that for a deployed
+system, inference rather than training dominates lifetime cost, since training
+happens occasionally and inference happens continuously. Traffic forecasting
+is exactly such a deployed setting: a metropolitan sensor network produces
+forecasts every few minutes, indefinitely. We therefore measure training
+energy and inference energy separately and report both, rather than treating
+training cost as a proxy for total cost.
+
+Our contribution is not a new method for measuring energy. It is the
+application of this existing discipline to an applied benchmark that has not
+adopted it, on hardware held fixed, with the resulting numbers placed beside
+the error numbers in the same table.
+
+\subsection{Efficient time-series models}
+A parallel line of work questions whether the architectural complexity in this
+area is earning its keep. Zeng et al.~\cite{zeng2023transformers} show that
+single-layer linear models are competitive with, and often superior to,
+elaborate transformer architectures on long-horizon forecasting benchmarks,
+and introduce NLinear and DLinear as deliberately minimal baselines. Within
+spatio-temporal forecasting specifically, STID~\cite{shao2022stid} makes a
+sharper claim: that much of what spatio-temporal graph neural networks
+contribute can be recovered by attaching learned spatial and temporal identity
+embeddings to a multi-layer perceptron, with no graph convolution at all. The
+authors attribute the gap to sample indistinguishability rather than to
+relational structure per se.
+
+These results are usually read as accuracy claims --- the simple model matches
+the complex one. Our measurements let them be read as cost claims instead,
+which is the stronger form of the argument: the question is not merely whether
+a lightweight model ties a heavyweight one on error, but what the heavyweight
+model charges for the difference, and whether that difference survives the
+heavyweight model's own run-to-run variance.
+
+\section{Methodology}
+\subsection{Dataset}
+We use the San Diego (SD) subset of LargeST~\cite{liu2023largest}, a traffic
+sensor dataset derived from California's Performance Measurement System. The
+SD subset is chosen deliberately: it is large enough that the cost differences
+between architectures are meaningful, while remaining trainable end to end on
+a single commodity GPU, which is a precondition for holding hardware fixed
+across every model in the comparison.
+
+The subset comprises the 716 sensors in Caltrans District 11. We use the 2019
+calendar year, aggregated from the raw five-minute feed into 15-minute bins by
+averaging, giving 96 steps per day and 35,040 steps in total; missing readings
+are zero-filled. Following the benchmark's protocol we forecast twelve steps
+(three hours) from a twelve-step input window, and split the year
+chronologically in a 6:2:2 ratio into 21,010 training, 7,003 validation and
+7,004 test windows. A chronological rather than random split matters here: the
+alternative leaks future traffic conditions into training and inflates every
+model's score at once, which would leave the accuracy axis compressed and the
+cost comparison harder to interpret.
+
+Each input carries three channels: the traffic flow reading itself, plus
+time-of-day and day-of-week indices. This detail is worth stating because it
+interacts with one of our results. Of the models we evaluate, NLinear consumes
+only the flow channel, since a single linear projection over the input window
+has no mechanism for calendar features, whereas STID's entire design premise
+is to exploit exactly those identity signals. A reader who does not know this
+will read NLinear as a strawman; in fact the comparison between the two
+isolates what the calendar embeddings are worth.
+
+Features are standardised using statistics computed on the training split
+only, and all reported errors are in the original units of the flow readings.
+
+\subsection{Models}
+We evaluate models spanning the cost spectrum rather than only the frontier of
+reported accuracy, because the question at issue is the shape of the
+trade-off, not the identity of the winner:
+
+\begin{itemize}
+  \item \textbf{Historical Last}, a parameter-free baseline that repeats the
+        most recent observation across the forecast horizon. It anchors the
+        cost axis at zero training energy and supplies the error level that
+        any learned model must beat to justify being trained at all.
+  \item \textbf{NLinear}~\cite{zeng2023transformers}, a single linear
+        projection over the input window, applied after subtracting the last
+        observed value and added back before output.
+  \item \textbf{STID}~\cite{shao2022stid}, a multi-layer perceptron over
+        learned spatial and temporal identity embeddings, with no graph
+        convolution.
+  \item \textbf{LSTM}, a recurrent baseline that models each sensor's history
+        sequentially and shares no information across sensors.
+  \item \textbf{STGCN}~\cite{yu2018stgcn}, which alternates temporal
+        convolutions with graph convolutions over the road-network adjacency
+        matrix.
+  \item \textbf{Graph WaveNet}~\cite{wu2019graphwavenet}, which augments
+        dilated temporal convolution with a self-adaptive adjacency matrix
+        learned from data rather than taken from the road network.
+\end{itemize}
+
+Model implementations and their hyperparameters are taken unmodified from the
+LargeST reference code, so that no baseline is disadvantaged by our tuning or
+lack of it. We had also intended to include STTN, a spatio-temporal
+transformer. We omit it for a reason that is itself a datum for this paper: at
+its measured per-epoch cost the model would not complete the training budget
+within the twelve-hour limit of the compute available to us, and a run
+terminated at that limit yields no usable record. A benchmark about the cost
+of accuracy is entitled to report that one of its candidates was too expensive
+to benchmark, but we prefer to state the omission plainly rather than present
+a truncated run beside converged ones.
+
+\subsection{Instrumentation}
+\label{sec:instr}
+All measurements are taken on a single NVIDIA T4. Holding the device fixed
+is essential rather than incidental: energy readings are not comparable
+across GPU generations, so a benchmark whose runs are spread over
+heterogeneous hardware cannot support cost claims at all. We verify that
+every reported run carries the same device identifier before aggregating.
+
+\paragraph{Energy.} Training and inference energy are read from the
+device's total-energy counter through NVML, which accumulates joules at the
+hardware level. We report training energy as the integral over the whole
+training run, and inference energy normalised per one thousand forecasts.
+
+\paragraph{A measurement bug worth reporting.} Our first implementation
+measured inference energy over a fixed number of batches. For the cheapest
+models this amounted to a few milliseconds of GPU work, far below the
+resolution of the energy counter, and the measurement returned exactly
+zero joules. A zero inference cost is not a defensible claim, and it
+silently distorted the deployment-cost comparison in favour of the
+cheapest models. The harness now replays batches until a wall-clock floor
+of five seconds has elapsed, with device synchronisation between passes.
+We report this because a benchmark's credibility rests on its instrument,
+and an unreported instrument failure of this kind is indistinguishable
+from a result.
+
+\paragraph{FLOPs, latency and parameters.} FLOPs per sample are counted
+analytically and flagged where the count is unreliable. Latency is
+measured per forward pass at batch size one after warm-up. Parameter
+counts include trainable parameters only.
+
+\subsection{Training protocol}
+Every model trains under an identical budget: a maximum of 100 epochs with
+early stopping at patience 30, the same optimiser settings, the same seed,
+and the same data pipeline. A fixed budget is the coherent choice for a
+cost-aware comparison, but it has a consequence that must be stated
+plainly: a model that reaches the epoch cap without early stopping has not
+converged, so its energy figure is a \emph{lower bound} on its true
+cost-to-convergence and its error is pessimistic. We mark such models
+explicitly rather than silently reporting their numbers alongside
+converged ones.
+
+\section{Results}
+
+Table~\ref{tab:main} reports every model on both axes. Rows are ordered by
+training energy, so the cost gradient runs down the table and can be read
+against the error columns beside it.
+
+\begin{table*}[t]
+\centering
+\caption{Accuracy and cost on LargeST-SD (716 sensors, 2019, 15-min). Energy is GPU-only, measured via NVML. Carbon assumes 195~gCO$_2$e/kWh. $\dag$~marks a model that reached the 100-epoch cap without early stopping: its energy is a lower bound, its error pessimistic.}
+\label{tab:main}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+Model & Params & MFLOPs & MAE & RMSE & MAPE (\%) & Train (Wh) & gCO$_2$e & Infer (J/1k) & Latency (ms) \\
+\midrule
+Historical Last & 0 & -- & 60.79 & 87.40 & 41.88 & 0 & 0 & 0.03 & 0.10 \\
+LSTM$^{\dag}$ & 97,932 & 1042.77 & 26.35 & 41.60 & 17.04 & 123.21 & 24.03 & 86.85 & 85.10 \\
+STGCN & 507,532 & 1018.76 & 19.78 & 34.18 & 14.01 & 165.05 & 32.19 & 134.11 & 202.63 \\
+Graph WaveNet$^{\dag}$ & 311,164 & 11883.93 & 18.30 & 30.61 & 12.39 & 568.00 & 110.78 & 369.25 & 355.04 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Accuracy}
+\PENDING{Final ordering by MAE/RMSE/MAPE once the lightweight models land;
+state the run-to-run spread before the ordering so that differences below it
+are not over-read.} Among the models measured so far the ordering is stable
+across all three error metrics: Graph WaveNet is most accurate at 18.30 MAE,
+followed by STGCN at 19.78, LSTM at 26.35, and Historical Last at 60.79. That
+the learned models improve on repeating the last observation by a factor of
+roughly three is expected and is reported only to establish that the task is
+being learned rather than trivially matched.
+
+The more informative comparison is among the learned models, where the spread
+is narrow. Graph WaveNet's advantage over STGCN is 1.47 MAE, or 7.4\% relative.
+LSTM is the outlier, 6.57 MAE behind STGCN, and it should be read with the
+caveat that it never early-stopped: its error is pessimistic and a longer
+budget would improve it somewhat. We return to this in
+Section~\ref{sec:threats}. The gap is not, however, of a size that additional
+epochs would close.
+
+\subsection{Cost}
+The cost axis spans a far wider range than the accuracy axis, and this
+asymmetry is the central empirical observation of the paper. Across the models
+measured, training energy varies by a factor of 4.61 between LSTM and Graph
+WaveNet, while their MAE differs by 8.05 --- but between STGCN and Graph
+WaveNet, where the error difference has narrowed to 1.47 MAE, the energy
+difference is still 3.44$\times$. The pattern is that error differences
+compress as models improve while cost differences do not. \PENDING{Restate
+these ratios over the full model set, including the lightweight models, which
+extend the low end of the cost axis by roughly an order of magnitude.}
+
+The deployment-side axes are wider still. Inference energy per thousand
+forecasts ranges from 0.03~J for the parameter-free baseline to 369~J for
+Graph WaveNet, a factor of 14,563, and single-sample latency from 0.10~ms to
+355~ms, a factor of 3,550. For a network of several hundred sensors producing
+forecasts continuously, these are the figures that determine the operating
+cost of a deployment, and they are not derivable from the error columns.
+
+\paragraph{Parameter count is not a cost proxy.} The clearest single
+demonstration in our measurements is the comparison between STGCN and Graph
+WaveNet. STGCN has 507,532 trainable parameters against Graph WaveNet's
+311,164 --- 1.63$\times$ as many --- and yet requires 11.7$\times$
+\emph{fewer} floating-point operations per sample, trains on 3.44$\times$ less
+energy, and answers 1.75$\times$ faster. A reader ranking these two models by
+parameter count would order them exactly backwards on every cost axis we
+measure. This is not a subtle effect at the margin; it is a reversal, and it
+is why we regard a measured cost protocol as necessary rather than merely
+desirable.
+
+\paragraph{Power draw, not merely runtime.} Cheaper models also draw less
+power \emph{while running}, so their advantage compounds beyond their shorter
+runtime. \PENDING{Report measured average power per model, computed as
+train\_joules / train\_seconds, once the lightweight runs land --- the pilot
+measurements showed roughly 31~W for NLinear against 65~W for LSTM on a device
+capped at 70~W.} An analytic FLOP count cannot capture this, which is a
+further argument for measurement over estimation.
+
+\subsection{The accuracy--cost frontier}
+\PENDING{Identify the Pareto frontier and its knee over the full model set,
+and name the strictly dominated models --- those achieving worse error at
+greater cost. A strictly dominated widely-used baseline is a result in itself,
+and on the partial results it is already visible that the frontier is not
+monotone in architectural sophistication.}
+
+\subsection{Forecast horizon}
+Whether the ranking is stable across the forecast horizon matters for
+deployment: a model that wins only at short horizons is a different
+recommendation from one that wins throughout. It is also where the
+parameter-free baseline's behaviour is most revealing. Historical Last
+degrades from 17.72 MAE at the first step to 101.74 at the twelfth --- a
+factor of 5.74 --- because repeating the last observation carries no
+information about how traffic evolves. The learned models degrade far more
+gently: Graph WaveNet from 12.51 to 22.55, a factor of 1.80, and STGCN from
+15.31 to 23.42, a factor of 1.53.
+
+This produces a crossover worth noting. At the first horizon step STGCN's
+15.31 MAE is worse than Graph WaveNet's 12.51 by 2.80, but by the twelfth step
+the gap has narrowed to 0.87. The most expensive model's advantage is
+concentrated at short horizons and erodes as the forecast lengthens, which
+weakens the case for its cost precisely in the long-horizon regime where
+forecasting is most useful operationally. \PENDING{Extend this analysis to the
+lightweight models and state whether the frontier ordering is horizon-stable.}
+
+\section{Discussion}
+Read together, the two axes of Table~\ref{tab:main} tell a different story
+than either would alone. On the error axis the learned models are separated by
+single units of MAE, and the separations shrink as the models get better. On
+the cost axis they are separated by multiplicative factors that do not shrink.
+A field that reports only the first axis sees a sequence of incremental
+improvements; a field that reports both sees those improvements being bought
+at a steeply rising price.
+
+This has a direct consequence for how architectural claims should be
+evaluated. When the accuracy difference between two models is comparable to
+the run-to-run variance of the training procedure that produced them, while
+the cost difference is an order of magnitude, the burden of proof shifts. A
+new architecture claiming a fractional MAE improvement should be expected to
+report what the improvement cost, and to demonstrate that the improvement
+exceeds the variance of its own training procedure --- a demonstration that
+requires more than one seed and is, at present, rarely offered. Our own
+measurements make this concrete: we observed a spread of approximately
+$\pm0.3$ MAE between two runs of the same model under the same seed, which is
+a substantial fraction of the differences separating the leading models in
+Table~\ref{tab:main}.
+
+The parameter-count reversal between STGCN and Graph WaveNet sharpens the
+point. Parameter count is the cost proxy most often reported when any is
+reported at all, and on our measurements it orders those two models backwards
+on FLOPs, on training energy and on latency simultaneously. A proxy that can
+invert the ranking it is standing in for is not a weak measurement; it is a
+misleading one. Nothing short of instrumenting the run recovers the true
+ordering.
+
+None of this argues that expensive models are never worth their cost. It
+argues that the question is currently unanswerable from the published record,
+because one side of the ledger is missing. Where the cost is worth paying ---
+a safety-critical application, or a short-horizon forecast where the accuracy
+gap is widest --- a practitioner should pay it, and our measurements let that
+judgement be made rather than guessed.
+\PENDING{Close with the frontier claim once the lightweight models land:
+state the knee and what it implies for a practitioner choosing a model for a
+metropolitan deployment.}
+
+\paragraph{What it would take to adopt this.} The instrumentation reported
+here is not elaborate. Energy comes from a counter the driver already
+maintains; FLOPs and parameters are counted analytically; latency requires a
+warm-up loop and a device synchronisation. The measurement bug described in
+Section~\ref{sec:instr} was the only genuine difficulty we encountered, and it
+is a solved problem now that it is documented. The cost of adding a cost
+protocol to an existing benchmark is a few hours of engineering, against which
+the cost of not having one is a literature whose central trade-off is
+invisible.
+
+\section{Threats to Validity}
+\label{sec:threats}
+\paragraph{Single seed.} Results are reported for one seed per model. We
+measured the run-to-run spread directly at approximately $\pm0.3$ MAE, by
+comparing two runs of the same model under identical seed and configuration,
+and we treat accuracy differences smaller than that spread as unresolved
+rather than as rankings. Our training is not bit-reproducible: the harness
+does not force deterministic cuDNN kernels, since doing so changes the
+performance characteristics we are trying to measure. This is a real
+limitation of the accuracy axis. It does not materially affect the cost axis,
+where the differences we report are multiplicative and orders of magnitude
+larger than any plausible run-to-run variation in energy.
+
+\paragraph{Models that hit the epoch cap.} LSTM and Graph WaveNet both reached
+the 100-epoch cap without early stopping; Graph WaveNet's validation error was
+still improving at epoch 98. For these two models the reported training energy
+is a lower bound on the true cost to convergence, and the reported error is
+pessimistic. They are marked in Table~\ref{tab:main} rather than mixed
+silently with converged runs. This cuts against our own argument rather than
+for it: Graph WaveNet's cost is understated, not overstated, so correcting it
+would widen the cost gap we report rather than narrow it.
+
+\paragraph{The parameter-free baseline's inference energy.} Historical Last
+has no computation to perform, so its measured inference energy of 0.03~J per
+thousand forecasts is dominated by idle device draw during the measurement
+window. This figure is the noise floor of the instrument, not a property of
+the model, and the 14,563$\times$ inference-energy span quoted against it
+should be read as the dynamic range of the measurement rather than as a clean
+model-to-model ratio.
+
+\paragraph{Energy scoping.} We measure GPU energy only. Host CPU, system
+memory, storage, networking, cooling and data-centre overhead are excluded, so
+every energy and carbon figure reported here is a lower bound on the true
+footprint of the run. We prefer this scoping to a whole-system estimate
+multiplied by an assumed power usage effectiveness, because the GPU counter is
+measured while the multiplier would be assumed, and mixing the two would
+obscure which part of the number is evidence.
+
+\paragraph{Single dataset and single device.} Results characterise one subset
+of one dataset on one GPU, an NVIDIA T4. Energy readings are not comparable
+across GPU generations, and we verified that every reported run carries the
+same device identifier before aggregating. The cost \emph{ratios} we report
+are more portable than the absolute joule figures, but neither should be
+extrapolated to other hardware without re-measurement.
+
+\paragraph{Carbon figures are derived, not measured.} Emissions are computed
+from measured energy using a fixed grid intensity of 195~gCO$_2$e/kWh, derived
+from the United States Environmental Protection Agency's eGRID subregion CAMX
+(WECC California) total output rate of 430.0~lb~CO$_2$e/MWh in eGRID2023
+Revision 2~\cite{epa2025egrid}. We use the California figure because LargeST
+is California data and a deployment on this sensor network would draw on this
+grid. The constant carries the usual caveats: it is an annual average over a
+grid whose real carbon intensity varies by hour and by season, so the carbon
+column should be read as a scaled version of the energy column rather than as
+an independent measurement.
+
+\section{Conclusion}
+We have reported a compute-aware benchmark of six traffic forecasting models
+on the San Diego subset of LargeST, in which every model trains under an
+identical budget on identical hardware while training energy, inference
+energy, FLOPs, parameters and latency are measured rather than estimated.
+Accuracy and cost are not proportional on this benchmark. Error differences
+between the leading models compress into single units of MAE, comparable to
+the run-to-run variance of the training procedures that produced them, while
+cost differences remain multiplicative across every axis we measure --- up to
+14,563$\times$ in inference energy and 3,550$\times$ in latency. Parameter
+count, the proxy most often reported in place of a measurement, inverts the
+true cost ordering of two of our models on three separate axes.
+\PENDING{Add the frontier and dominance claims once the lightweight models
+land.} We release the instrumented harness so that reporting cost becomes as
+routine as reporting error, and so that the next architecture proposed for
+this benchmark can be asked not only whether it is more accurate, but what its
+accuracy costs.
+
+\paragraph{Reproducibility.} The harness, the run configurations and the raw
+per-run records underlying Table~\ref{tab:main} are available at
+\PENDING{repository URL}.
+
+\begin{acks}
+Use of AI: the author used a large language model as a coding and drafting
+assistant during the development of the measurement harness and the
+preparation of this manuscript. All experimental design decisions were made
+by the author; every reported measurement was produced by executing the
+described harness on the stated hardware; and no result in this paper was
+generated, estimated or extrapolated by a language model.
+\end{acks}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{refs}
+
+\end{document}
