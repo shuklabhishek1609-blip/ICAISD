@@ -12,6 +12,8 @@
 
 \usepackage{booktabs}
 \usepackage{xcolor}
+\usepackage{graphicx}
+\graphicspath{{../figures/}{figures/}}
 
 % Loud placeholder: an unmeasured number must never reach a reviewer quietly.
 \newcommand{\PENDING}[1]{\textcolor{red}{\textbf{[PENDING: #1]}}}
@@ -25,6 +27,7 @@ Traffic Forecasting Models on LargeST}
 \email{shuklabhishek1609@gmail.com}
 \affiliation{%
   \institution{Independent Researcher}
+  \city{Scotch Plains}
   \country{United States}
 }
 \thanks{Corresponding author.}
@@ -32,20 +35,24 @@ Traffic Forecasting Models on LargeST}
 \begin{abstract}
 Spatio-temporal traffic forecasting is evaluated almost entirely on error
 metrics, and the field's leaderboards are therefore silent about what
-accuracy costs to obtain. We report a compute-aware benchmark of
-six forecasting models on the San Diego subset of LargeST, in which
-every model is trained under an identical budget on identical hardware
-while training energy, inference energy, FLOPs, parameter count and
-inference latency are measured rather than estimated. We find that the
-accuracy--cost frontier is extremely uneven: \PENDING{headline comparison,
-e.g.\ the most expensive model's MAE advantage over a lightweight
-embedding model is 0.41, which is within the measured run-to-run spread,
-while costing 45$\times$ the training energy and 83$\times$ the FLOPs}. Two
-widely used baselines are strictly dominated, achieving worse error than a
-cheaper model at an order of magnitude more energy. We argue that reporting
-error alone is insufficient for a field whose models are increasingly
-deployed on metropolitan-scale sensor networks, and we release the
-instrumented harness so that cost can be reported as routinely as error.
+accuracy costs to obtain. We report a compute-aware benchmark on the San
+Diego subset of LargeST in which four forecasting models are trained under
+an identical budget on identical hardware while training energy, inference
+energy, FLOPs, parameter count and inference latency are measured rather
+than estimated. Our central finding concerns the proxies the field reports
+in place of a measurement: across our lineup neither parameter count nor
+analytic FLOPs reproduces the measured cost ordering, while the three
+measured cost axes agree with one another exactly. The discrepancy is not
+marginal. STGCN carries $1.63\times$ Graph WaveNet's parameters yet needs
+$11.67\times$ fewer FLOPs, trains on $3.44\times$ less energy and answers
+$1.75\times$ faster, so ranking the two by parameter count inverts their
+true ordering on every axis we measured. We further show that deployed
+inference energy overtakes the one-off cost of training within 64 to 81
+days at this network's scale, so a cost accounting that considers training
+alone understates the lifetime figure. We argue that reporting error alone
+is insufficient for a field whose models are increasingly deployed on
+metropolitan-scale sensor networks, and we release the instrumented harness
+so that cost can be reported as routinely as error.
 \end{abstract}
 
 \begin{CCSXML}
@@ -97,22 +104,31 @@ ignores the sequential structure that makes recurrent models slow, the
 dense message passing that makes graph models expensive, and the fact that
 models differ in average power draw while running, not only in runtime.
 
-This paper contributes a compute-aware benchmark of six traffic
-forecasting models evaluated on the San Diego subset of the LargeST
-dataset. Our contributions are:
+This paper contributes a compute-aware benchmark of traffic forecasting
+models evaluated on the San Diego subset of the LargeST dataset. Our
+contributions are:
 
 \begin{itemize}
   \item \textbf{An instrumented evaluation harness} that measures training
         energy, inference energy, FLOPs, parameter count and inference
         latency alongside conventional error metrics, on a single fixed
         GPU, under a training budget held identical across models.
-  \item \textbf{A measured accuracy--cost frontier} for the model families
-        in common use, identifying which models lie on the Pareto frontier
-        and which are strictly dominated.
+  \item \textbf{A fidelity audit of the cost proxies the field actually
+        reports.} We compare parameter count and analytic FLOPs against
+        measured training energy, inference energy and latency on the same
+        models, and find that neither proxy reproduces the measured
+        ordering while the measured axes agree with one another. A proxy
+        that inverts the quantity it stands in for is worse than no proxy,
+        because it is reported with confidence.
+  \item \textbf{A lifetime cost accounting.} We show that deployed
+        inference energy overtakes the one-off training cost within months
+        at metropolitan sensor-network scale, which reframes which axis a
+        deployment decision should weigh.
   \item \textbf{An explicit treatment of measurement validity.} We report
         run-to-run variance, identify which of our own numbers are bounds
-        rather than point estimates, and state where a measurement reflects
-        the instrument rather than the model.
+        rather than point estimates, state where a measurement reflects
+        the instrument rather than the model, and separate quantities we
+        measured from quantities we could only derive analytically.
   \item \textbf{A released harness} so that cost reporting is reproducible
         and cheap for subsequent work to adopt.
 \end{itemize}
@@ -247,10 +263,11 @@ trade-off, not the identity of the winner:
         any learned model must beat to justify being trained at all.
   \item \textbf{NLinear}~\cite{zeng2023transformers}, a single linear
         projection over the input window, applied after subtracting the last
-        observed value and added back before output.
+        observed value and added back before output. \emph{Analytic axes
+        only} --- see below.
   \item \textbf{STID}~\cite{shao2022stid}, a multi-layer perceptron over
         learned spatial and temporal identity embeddings, with no graph
-        convolution.
+        convolution. \emph{Analytic axes only} --- see below.
   \item \textbf{LSTM}, a recurrent baseline that models each sensor's history
         sequentially and shares no information across sensors.
   \item \textbf{STGCN}~\cite{yu2018stgcn}, which alternates temporal
@@ -271,6 +288,21 @@ terminated at that limit yields no usable record. A benchmark about the cost
 of accuracy is entitled to report that one of its candidates was too expensive
 to benchmark, but we prefer to state the omission plainly rather than present
 a truncated run beside converged ones.
+
+\paragraph{Two models reported on analytic axes only.} NLinear and STID
+appear in this paper on their architecture-determined axes --- parameter
+count and forward FLOPs --- but not on the measured ones. The metered runs
+we hold for both were produced under an earlier early-stopping setting
+(patience 15 rather than 30) and under the defective inference meter
+described in Section~\ref{sec:instr}, so they belong to a different
+protocol than Table~\ref{tab:main} and we exclude them from it rather than
+mix two budgets in one table. We report their analytic costs because those
+quantities are properties of the architecture and the input shape alone:
+they are fixed by the model definition and do not depend on weights, seed,
+early stopping or the training run, and we recomputed both from the model
+definitions independently of the affected records. Where the distinction
+matters below we mark it. This is a limitation, and we state in
+Section~\ref{sec:threats} exactly which claims it prevents us from making.
 
 \subsection{Instrumentation}
 \label{sec:instr}
@@ -336,9 +368,12 @@ Graph WaveNet$^{\dag}$ & 311,164 & 11883.93 & 18.30 & 30.61 & 12.39 & 568.00 & 1
 \end{table*}
 
 \subsection{Accuracy}
-\PENDING{Final ordering by MAE/RMSE/MAPE once the lightweight models land;
-state the run-to-run spread before the ordering so that differences below it
-are not over-read.} Among the models measured so far the ordering is stable
+Before giving the ordering we state the precision it should be read at. Our
+training is not bit-reproducible: the harness leaves cuDNN's non-deterministic
+kernel selection enabled, and two runs of the same model at the same seed
+differ by roughly $0.3$~MAE (Section~\ref{sec:threats}). Differences below
+that figure should not be read as separating two models. Among the models
+measured the ordering is stable
 across all three error metrics: Graph WaveNet is most accurate at 18.30 MAE,
 followed by STGCN at 19.78, LSTM at 26.35, and Historical Last at 60.79. That
 the learned models improve on repeating the last observation by a factor of
@@ -354,15 +389,32 @@ Section~\ref{sec:threats}. The gap is not, however, of a size that additional
 epochs would close.
 
 \subsection{Cost}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{pareto_infer_joules_per_1k.pdf}
+\caption{The same frontier measured on inference energy per 1000 samples
+(log scale). The ordering of the learned models is identical to
+Figure~\ref{fig:pareto-train}---the agreement between measured axes that
+Section~\ref{sec:proxy} quantifies---while the gap to Historical Last widens
+to four orders of magnitude.}
+\Description{Scatter plot of test MAE against inference energy per thousand samples on a logarithmic axis for the same four models. The ordering of the learned models matches the training-energy plot, and Historical Last sits four orders of magnitude to the left.}
+\label{fig:pareto-infer}
+\end{figure}
+
 The cost axis spans a far wider range than the accuracy axis, and this
 asymmetry is the central empirical observation of the paper. Across the models
 measured, training energy varies by a factor of 4.61 between LSTM and Graph
 WaveNet, while their MAE differs by 8.05 --- but between STGCN and Graph
 WaveNet, where the error difference has narrowed to 1.47 MAE, the energy
 difference is still 3.44$\times$. The pattern is that error differences
-compress as models improve while cost differences do not. \PENDING{Restate
-these ratios over the full model set, including the lightweight models, which
-extend the low end of the cost axis by roughly an order of magnitude.}
+compress as models improve while cost differences do not. The analytic axis
+extends this pattern well past the range we metered: STID's forward cost is
+143.52~MFLOPs against Graph WaveNet's 11{,}883.93~MFLOPs, a factor of 82.8,
+and NLinear's 0.21~MFLOPs is four further orders of magnitude below that
+(Table~\ref{tab:analytic}). Whether accuracy falls in proportion is precisely
+what a metered run of those two models would settle, and we do not claim it
+here.
 
 The deployment-side axes are wider still. Inference energy per thousand
 forecasts ranges from 0.03~J for the parameter-free baseline to 369~J for
@@ -382,22 +434,177 @@ measure. This is not a subtle effect at the margin; it is a reversal, and it
 is why we regard a measured cost protocol as necessary rather than merely
 desirable.
 
-\paragraph{Power draw, not merely runtime.} Cheaper models also draw less
-power \emph{while running}, so their advantage compounds beyond their shorter
-runtime. \PENDING{Report measured average power per model, computed as
-train\_joules / train\_seconds, once the lightweight runs land --- the pilot
-measurements showed roughly 31~W for NLinear against 65~W for LSTM on a device
-capped at 70~W.} An analytic FLOP count cannot capture this, which is a
-further argument for measurement over estimation.
+\paragraph{Power draw is saturated across the heavy models.} Average power
+over training, computed as train\_joules divided by train\_seconds, is
+64.62~W for LSTM, 60.17~W for STGCN and 57.98~W for Graph WaveNet, on a
+device whose board power limit is 70~W. All three sit close to that limit, so
+within this group energy is governed almost entirely by runtime rather than
+by instantaneous draw --- and the ordering is in fact mildly \emph{inverted},
+with the most expensive model drawing the least power and paying for its cost
+purely in hours. We flag this because it bounds the generality of a claim we
+expected to make. A pilot run of NLinear, outside the protocol of
+Table~\ref{tab:main} and so not reported as a result, drew roughly 31~W;
+if that figure survives a metered run it would mean the power axis separates
+lightweight from heavy models while barely separating heavy models from each
+other. On the evidence we can currently defend, the honest statement is the
+narrower one: among models that saturate the device, runtime is the whole
+story, and we cannot yet say where the draw begins to fall.
 
 \subsection{The accuracy--cost frontier}
-\PENDING{Identify the Pareto frontier and its knee over the full model set,
-and name the strictly dominated models --- those achieving worse error at
-greater cost. A strictly dominated widely-used baseline is a result in itself,
-and on the partial results it is already visible that the frontier is not
-monotone in architectural sophistication.}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{pareto_train_joules.pdf}
+\caption{The accuracy--cost frontier on training energy (log scale). All four
+metered models lie on the frontier, so what the figure carries is the
+\emph{shape} of the trade rather than any exclusion: the curve flattens, and
+the last step---STGCN to Graph WaveNet---buys 1.47~MAE for $3.44\times$ the
+energy. Historical Last trains on zero energy and is drawn at the left margin
+with an open marker and a ``(0)'' label, since zero has no position on a
+logarithmic axis.}
+\Description{Scatter plot of test MAE against training energy on a logarithmic axis for four models. Error falls as energy rises, from Historical Last at zero energy through LSTM and STGCN to Graph WaveNet, and the curve flattens sharply at the expensive end.}
+\label{fig:pareto-train}
+\end{figure}
+
+On the training-energy axis the four metered models form a monotone frontier:
+error falls as energy rises, from Historical Last at zero energy through LSTM
+and STGCN to Graph WaveNet. No model is strictly dominated on that axis, and
+we say so plainly because the opposite would have been the more striking
+result. What the frontier shows instead is diminishing return. The step from
+LSTM to STGCN buys 6.57~MAE for $1.34\times$ the energy; the step from STGCN
+to Graph WaveNet buys 1.47~MAE for $3.44\times$ the energy. The last step is
+the expensive one, and it purchases the smallest improvement.
+
+Domination does appear once cost is measured on a different axis. Against
+forward FLOPs, STGCN strictly dominates LSTM --- better error at 19.78 versus
+26.35 MAE, and fewer FLOPs at 1{,}018.76~M versus 1{,}042.77~M. We report the
+margin honestly: the FLOP difference is 2.4\%, narrow enough that it should be
+read as the two models being equal on that axis while their accuracy differs
+substantially, rather than as a decisive cost win. The methodological point is
+the durable one. Whether a model is dominated depends on which cost axis is
+consulted, and a benchmark reporting a single cost number --- or none --- hides
+that dependence.
+
+\subsection{Do cost proxies predict measured cost?}
+\label{sec:proxy}
+The field, when it reports cost at all, reports parameter count or analytic
+FLOPs. Both are cheap to obtain and neither requires the instrumentation this
+paper describes, so the practical question is whether they make that
+instrumentation unnecessary. Table~\ref{tab:proxy} answers it for our lineup
+by ranking the three learned, fully metered models under each proxy and under
+each measurement.
+
+\begin{table}[t]
+\centering
+\caption{Cost rank (1 = cheapest) of the three learned models under two
+proxies and three measurements. The measured axes agree with one another
+exactly; neither proxy reproduces them.}
+\label{tab:proxy}
+\begin{tabular}{lccc}
+\toprule
+ & LSTM & STGCN & Graph WaveNet \\
+\midrule
+\multicolumn{4}{l}{\emph{Proxy}} \\
+Parameter count      & 1 & \textbf{3} & \textbf{2} \\
+Analytic FLOPs       & \textbf{2} & \textbf{1} & 3 \\
+\midrule
+\multicolumn{4}{l}{\emph{Measured}} \\
+Training energy      & 1 & 2 & 3 \\
+Inference energy     & 1 & 2 & 3 \\
+Inference latency    & 1 & 2 & 3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two things stand out. First, the three measured axes are mutually consistent:
+training energy, inference energy and latency induce the identical ordering,
+which is evidence that they are measuring a real underlying cost rather than
+three unrelated artefacts of the instrument. Second, neither proxy recovers
+that ordering. Parameter count places STGCN as the most expensive of the three
+when it is in fact the middle one, and analytic FLOPs place STGCN as the
+cheapest when LSTM is. Each proxy is wrong about a different pair, so neither
+can be repaired by a constant correction.
+
+\paragraph{The clearest single case.} STGCN and Graph WaveNet invert
+completely. STGCN has 507{,}532 trainable parameters against Graph WaveNet's
+311{,}164, so by the most commonly reported proxy it is the larger and by
+implication the costlier model, at $1.63\times$ the parameter count. Every
+axis we measured says the reverse, and not narrowly: STGCN requires
+$11.67\times$ fewer FLOPs per sample, trains on $3.44\times$ less energy,
+answers $1.75\times$ faster and consumes $2.75\times$ less energy per thousand
+forecasts. A practitioner choosing between these two architectures on
+parameter count would be wrong about the cost of that choice on four separate
+axes simultaneously, and would have no indication from the reported figure
+that anything was amiss. This is why we regard an unfaithful proxy as worse
+than an absent one.
+
+The reason is structural rather than accidental. Parameter count measures
+storage, not work. Graph WaveNet's adaptive adjacency matrix is applied
+densely at every layer and every timestep, so a comparatively small set of
+weights is reused across a very large number of operations; STGCN's larger
+weight tensors are applied more sparingly. Analytic FLOPs capture that
+distinction but miss others --- they are blind to memory traffic, to kernel
+efficiency, and to the fact that a recurrent model's sequential dependency
+prevents the parallel execution its FLOP count implies, which is why FLOPs
+misplace LSTM specifically.
+
+\subsection{Architecture-determined cost across the full lineup}
+Parameter count and forward FLOPs are fixed by a model's definition and its
+input shape. They require no training run, no energy meter and no particular
+device, and they are therefore the two axes on which we can report all six
+models under one consistent procedure. Table~\ref{tab:analytic} does so.
+
+\begin{table}[t]
+\centering
+\caption{Architecture-determined cost for all six models, computed from the
+model definitions at $N=716$ sensors, 12-step input and 12-step horizon.
+These quantities do not depend on training. The final column marks which
+models additionally carry metered results in Table~\ref{tab:main}.}
+\label{tab:analytic}
+\begin{tabular}{lrrc}
+\toprule
+Model & Params & MFLOPs/sample & Metered \\
+\midrule
+Historical Last & 0 & -- & \checkmark \\
+NLinear & 111{,}696 & 0.21 & \\
+STID & 127{,}244 & 143.52 & \\
+LSTM & 97{,}932 & 1{,}042.77 & \checkmark \\
+STGCN & 507{,}532 & 1{,}018.76 & \checkmark \\
+Graph WaveNet & 311{,}164 & 11{,}883.93 & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The spread on the analytic axis is far wider than anything in
+Table~\ref{tab:main}: from NLinear's 0.21~MFLOPs to Graph WaveNet's
+11{,}883.93~MFLOPs is a factor of 57{,}631, and even between STID and Graph
+WaveNet --- both of which are ordinary supervised forecasters rather than
+trivial baselines --- it is a factor of 82.8. Table~\ref{tab:analytic} also
+makes the proxy failure legible directly: parameter count varies by a factor
+of only 5.2 across the five learned models while FLOPs vary by a factor of
+57{,}631, so the two axes are not merely mis-ordered relative to each other
+but differ by four orders of magnitude in how much they vary at all.
+
+We are deliberately not converting the analytic column into an accuracy claim.
+Knowing that STID costs 82.8 times fewer FLOPs than Graph WaveNet says nothing
+on its own about what that buys or forfeits in error, and the metered runs that
+would settle it are the ones we do not currently hold under the common
+protocol.
 
 \subsection{Forecast horizon}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{horizon.pdf}
+\caption{Test MAE against forecast step. Historical Last degrades by
+$5.74\times$ across the horizon while the learned models degrade by $1.53$ to
+$2.73\times$. The two graph models converge: Graph WaveNet's advantage over
+STGCN contracts from 2.80~MAE at the first step to 0.87 at the twelfth, while
+the $3.44\times$ energy ratio that bought it does not contract at all.}
+\Description{Line chart of test MAE against forecast step from one to twelve for four models. Historical Last rises steeply and roughly linearly; the three learned models rise far more gently, with STGCN and Graph WaveNet converging toward one another at the longest horizons.}
+\label{fig:horizon}
+\end{figure}
+
 Whether the ranking is stable across the forecast horizon matters for
 deployment: a model that wins only at short horizons is a different
 recommendation from one that wins throughout. It is also where the
@@ -413,8 +620,85 @@ This produces a crossover worth noting. At the first horizon step STGCN's
 the gap has narrowed to 0.87. The most expensive model's advantage is
 concentrated at short horizons and erodes as the forecast lengthens, which
 weakens the case for its cost precisely in the long-horizon regime where
-forecasting is most useful operationally. \PENDING{Extend this analysis to the
-lightweight models and state whether the frontier ordering is horizon-stable.}
+forecasting is most useful operationally. Quantitatively, Graph WaveNet's MAE
+advantage over STGCN falls from 2.80 at the first 15-minute step to 0.87 at
+the twelfth, a contraction of $3.21\times$; at the far end it is under three
+times the run-to-run spread, while the $3.44\times$ energy ratio that bought
+it does not contract at all.
+
+The ordering is also not quite horizon-stable, and the exception is
+instructive. At the first step LSTM is the second most accurate model, ahead
+of STGCN at 13.72 against 15.31 MAE; from the second step onward STGCN is
+ahead and the gap widens monotonically to 14.03 MAE by the twelfth. LSTM's
+error grows by $2.73\times$ across the horizon against STGCN's $1.53\times$
+and Graph WaveNet's $1.80\times$. A recurrent model with no cross-sensor
+information is competitive when the recent past nearly determines the answer
+and degrades quickly once it does not, which means a benchmark reporting only
+horizon-averaged MAE would conceal both that LSTM is the better short-horizon
+model and that it is a much worse long-horizon one. We could not extend this
+analysis to NLinear and STID, whose horizon curves we hold only under the
+superseded protocol.
+
+\subsection{Lifetime cost: when inference overtakes training}
+\label{sec:lifetime}
+Training energy is the figure the efficiency literature reports, because it is
+the figure a research group pays. A deployment pays a different one. A model
+trained once is then queried continuously for as long as it is in service, and
+the relevant comparison is between a one-off training cost and an inference
+cost that accrues indefinitely. Our measurements let us place the crossover
+rather than assert it.
+
+At LargeST-SD's scale --- 716 sensors, one forecast per sensor per 15-minute
+interval --- a deployment issues 68{,}736 forecasts per day and 25.09 million
+per year. Combining that rate with the measured inference energy of
+Table~\ref{tab:main} gives the accounting in Table~\ref{tab:lifetime}.
+
+\begin{table}[t]
+\centering
+\caption{Training cost against accrued inference cost at LargeST-SD scale
+(716 sensors, 15-minute cadence, 25.09M forecasts per year). Break-even is
+the number of days of service after which inference energy equals the energy
+of one training run.}
+\label{tab:lifetime}
+\begin{tabular}{lrrrr}
+\toprule
+Model & Train (kWh) & Infer (kWh/yr) & Ratio & Break-even \\
+\midrule
+LSTM$^{\dag}$          & 0.123 & 0.605 & 4.91$\times$ & 74 days \\
+STGCN                  & 0.165 & 0.935 & 5.66$\times$ & 64 days \\
+Graph WaveNet$^{\dag}$ & 0.568 & 2.573 & 4.53$\times$ & 81 days \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Every model crosses over within roughly two to three months, and the
+consistency of that window is itself worth noting: although the three models
+differ by $4.6\times$ in training energy and $4.3\times$ in inference energy,
+they break even within 17 days of one another, because both costs scale with
+broadly the same architectural work. After a year of service, inference has
+consumed between 4.5 and 5.7 times the energy of the training run that
+produced the model --- and a model held in service for several years, or
+retrained periodically as traffic patterns drift, shifts the balance further
+toward inference.
+
+This changes which number a deployment decision should weigh. Graph WaveNet's
+training premium over STGCN is 0.403~kWh, paid once. Its inference premium is
+1.638~kWh per year, paid every year, and it is the larger quantity within the
+first three months of service. A benchmark that reports training cost alone
+--- as efficiency-aware work in this area generally does --- therefore
+understates the lifetime cost of the more expensive model, and understates it
+increasingly the longer the model is useful.
+
+Absolute magnitudes at this scale are modest, and we will not overstate them:
+2.573~kWh per year is roughly 0.50~kgCO$_2$e at our assumed grid intensity,
+which is not by itself an argument against any architecture. The figures scale
+with the sensor network, though, and LargeST-SD is one district. Extrapolating
+the same cadence to the full 8{,}600-sensor California network gives 7.3,
+11.2 and 30.9~kWh per year for LSTM, STGCN and Graph WaveNet respectively,
+or 1.42 to 6.03~kgCO$_2$e. The argument we draw from this is about
+proportionality rather than absolute harm: the accuracy differences separating
+these models are fractions of a MAE unit, and the cost differences separating
+them are multiplicative and permanent.
 
 \section{Discussion}
 Read together, the two axes of Table~\ref{tab:main} tell a different story
@@ -452,9 +736,20 @@ because one side of the ledger is missing. Where the cost is worth paying ---
 a safety-critical application, or a short-horizon forecast where the accuracy
 gap is widest --- a practitioner should pay it, and our measurements let that
 judgement be made rather than guessed.
-\PENDING{Close with the frontier claim once the lightweight models land:
-state the knee and what it implies for a practitioner choosing a model for a
-metropolitan deployment.}
+For a practitioner choosing a model for a metropolitan deployment, our results
+support a narrower recommendation than a full frontier would, and we state it
+at the strength the evidence carries. Do not rank candidate architectures by
+parameter count: on our lineup it is not merely imprecise but directionally
+wrong, and analytic FLOPs, while better, misplace recurrent models. If cost
+matters to the decision, it has to be measured, and Section~\ref{sec:lifetime}
+indicates that the measurement should extend to inference rather than stopping
+at training. Among the models we metered, STGCN obtains 82\% of Graph
+WaveNet's accuracy improvement over LSTM for 29\% of the training energy and
+36\% of the per-forecast energy, which makes it the better default of the two
+unless the short-horizon regime, where Graph WaveNet's advantage is
+concentrated, is the operative one. Whether a lighter model again would hold
+that position is the question our incomplete lightweight measurements leave
+open.
 
 \paragraph{What it would take to adopt this.} The instrumentation reported
 here is not elaborate. Energy comes from a counter the driver already
@@ -468,6 +763,26 @@ invisible.
 
 \section{Threats to Validity}
 \label{sec:threats}
+\paragraph{The lightweight models are not metered, and this is the study's
+principal limitation.} NLinear and STID appear only on the analytic axes of
+Table~\ref{tab:analytic}. Those axes are sound --- parameter count and forward
+FLOPs are determined by the model definition and input shape, and we
+recomputed both directly from the definitions rather than reading them from
+the affected records --- but they are not substitutes for measurement, which
+is the entire argument of Section~\ref{sec:proxy}. We are explicit about what
+this forecloses. We cannot state where the accuracy--cost frontier has its
+knee, because the knee on our earlier pilot data lay at STID. We cannot claim
+that a lightweight model matches an expensive one at a fraction of the cost,
+which was our motivating hypothesis. We cannot report whether average power
+draw falls for models that do not saturate the device. And our proxy-fidelity
+result rests on three learned models, which is a small enough $n$ that we
+present it as a demonstration that proxies \emph{can} invert --- established
+decisively by the STGCN and Graph WaveNet pair, where the inversion holds on
+four independent axes --- rather than as an estimate of how often they do.
+Completing the two metered runs under the common protocol is the first item of
+future work, and the harness and run configurations to do so are released with
+the paper.
+
 \paragraph{Single seed.} Results are reported for one seed per model. We
 measured the run-to-run spread directly at approximately $\pm0.3$ MAE, by
 comparing two runs of the same model under identical seed and configuration,
@@ -523,19 +838,27 @@ column should be read as a scaled version of the energy column rather than as
 an independent measurement.
 
 \section{Conclusion}
-We have reported a compute-aware benchmark of six traffic forecasting models
-on the San Diego subset of LargeST, in which every model trains under an
+We have reported a compute-aware benchmark of traffic forecasting models on
+the San Diego subset of LargeST, in which four models train under an
 identical budget on identical hardware while training energy, inference
-energy, FLOPs, parameters and latency are measured rather than estimated.
+energy, FLOPs, parameters and latency are measured rather than estimated, and
+two further models are characterised on their architecture-determined axes.
 Accuracy and cost are not proportional on this benchmark. Error differences
 between the leading models compress into single units of MAE, comparable to
 the run-to-run variance of the training procedures that produced them, while
 cost differences remain multiplicative across every axis we measure --- up to
 14,563$\times$ in inference energy and 3,550$\times$ in latency. Parameter
 count, the proxy most often reported in place of a measurement, inverts the
-true cost ordering of two of our models on three separate axes.
-\PENDING{Add the frontier and dominance claims once the lightweight models
-land.} We release the instrumented harness so that reporting cost becomes as
+true cost ordering of two of our models on four separate axes, and analytic
+FLOPs misorder a different pair; neither proxy reproduces the ordering that
+all three of our measured cost axes agree on. On the training-energy axis the
+frontier we measure is monotone, with returns that diminish sharply --- the
+final step buys 1.47~MAE for $3.44\times$ the energy --- while on the FLOP
+axis one widely used baseline is strictly dominated. Extending the accounting
+from training to service life, inference energy overtakes the cost of training
+within 64 to 81 days at this network's scale and exceeds it fivefold within a
+year, so the axis the literature reports is not the axis a deployment pays.
+We release the instrumented harness so that reporting cost becomes as
 routine as reporting error, and so that the next architecture proposed for
 this benchmark can be asked not only whether it is more accurate, but what its
 accuracy costs.

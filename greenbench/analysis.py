@@ -192,16 +192,31 @@ def plot_horizon(records, models=None, out='figures/horizon'):
     fig, ax = plt.subplots(figsize=(6.4, 4.0), facecolor=SURFACE)
     _style_axes(ax)
 
+    ends = []
     for i, r in enumerate(records):
         steps = np.arange(1, len(r.horizon_mae) + 1)
         color = SERIES[i % len(SERIES)]
         ax.plot(steps, r.horizon_mae, color=color, linewidth=2.0,
                 marker='o', markersize=5, markeredgecolor=SURFACE,
                 markeredgewidth=1.5, label=DISPLAY_NAME.get(r.model, r.model), zorder=3)
-        # direct label at the line end (also the relief for low-contrast hues)
-        ax.annotate(DISPLAY_NAME.get(r.model, r.model),
-                    (steps[-1], r.horizon_mae[-1]),
-                    textcoords='offset points', xytext=(8, 0),
+        ends.append((r.horizon_mae[-1], steps[-1], DISPLAY_NAME.get(r.model, r.model)))
+
+    # Direct labels at the line ends (also the relief for low-contrast hues).
+    # Curves that converge -- STGCN and Graph WaveNet do, which is a finding --
+    # would otherwise print their labels on top of one another. Stagger the
+    # vertical offsets so that a convergence stays readable as a convergence
+    # instead of as a typographic collision.
+    ends.sort()
+    offsets = [0.0] * len(ends)
+    min_gap = 11.0  # points; ~1.2 line heights at 9pt
+    span = ax.get_ylim()[1] - ax.get_ylim()[0]
+    pts_per_unit = ax.get_window_extent().height / span if span else 1.0
+    for i in range(1, len(ends)):
+        gap = (ends[i][0] - ends[i - 1][0]) * pts_per_unit + offsets[i - 1]
+        if gap < min_gap:
+            offsets[i] = min_gap - gap
+    for (y, x, name), dy in zip(ends, offsets):
+        ax.annotate(name, (x, y), textcoords='offset points', xytext=(8, dy),
                     fontsize=9, color=INK_PRIMARY, va='center', zorder=4)
 
     ax.set_xlabel('Forecast horizon (15-min steps)', fontsize=10, color=INK_SECONDARY)
