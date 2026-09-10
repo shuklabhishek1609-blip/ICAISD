@@ -3,7 +3,8 @@
 Source of truth: `template/ICAISD_2026_Template_original.zip`, downloaded 2026-08-04 from
 the "Download Templates" page at https://www.icaisd.com/ktgmfiqw (the link is injected by
 JS; the real endpoint is `https://www.ais.cn/service/open/archive/down/E5C57EBMFI5H9FJNN4RA879J`).
-Archive was built 2025-09-04. Re-check before submitting in case it is revised.
+Archive was built 2025-09-04. **Re-checked 2026-09-09: re-downloaded the pack and it is
+byte-identical to the 4 Aug copy (sha256 3e4d3902d279499d...). Not revised.**
 
 ## Verdict: ACM, not IEEE
 
